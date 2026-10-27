@@ -36,7 +36,8 @@
             btn_cancel: '取消',
             btn_save: '保存',
             menu_settings: '⚙️ 赛程时区设置',
-            menu_reset: '🔄 恢复为跟随本机时间'
+            menu_reset: '🔄 恢复为跟随本机时间',
+            notice_converted: '所有比赛时间已换算为'
         },
         ja: {
             badge_local: '(ローカル)',
@@ -47,7 +48,8 @@
             btn_cancel: 'キャンセル',
             btn_save: '保存',
             menu_settings: '⚙️ 試合日程のタイムゾーン設定',
-            menu_reset: '🔄 端末のタイムゾーンに戻す'
+            menu_reset: '🔄 端末のタイムゾーンに戻す',
+            notice_converted: '全試合時刻は換算済み:'
         },
         en: {
             badge_local: '(Local)',
@@ -58,7 +60,8 @@
             btn_cancel: 'Cancel',
             btn_save: 'Save',
             menu_settings: '⚙️ Schedule Timezone Settings',
-            menu_reset: '🔄 Reset to Device Timezone'
+            menu_reset: '🔄 Reset to Device Timezone',
+            notice_converted: 'All matches converted to'
         }
     };
 
@@ -153,13 +156,17 @@
         return -new Date().getTimezoneOffset();
     }
 
-    // Clear WTT schedule localStorage cache so that fresh transformed data is always loaded
+    // Clear WTT schedule & results localStorage cache so that fresh transformed data is always loaded
     function clearWttScheduleCache() {
         try {
             const keysToRemove = [];
             for (let i = 0; i < localStorage.length; i++) {
                 const key = localStorage.key(i);
-                if (key && (key.startsWith('event_schedule_v2_') || key.startsWith('event_schedule_upcoming_only_v2_'))) {
+                if (key && (
+                    key.startsWith('event_schedule_') ||
+                    key.startsWith('official_result_') ||
+                    key.startsWith('live_matches_')
+                )) {
                     keysToRemove.push(key);
                 }
             }
@@ -200,7 +207,10 @@
         if (!dateStr || !timeStr) return { date: dateStr, time: timeStr };
         try {
             const [y, m, d] = dateStr.split('-').map(Number);
-            const [hh, mm] = timeStr.split(':').map(Number);
+            const timeParts = timeStr.split(':');
+            const hh = Number(timeParts[0]);
+            const mm = Number(timeParts[1]);
+            const ssSuffix = timeParts.length > 2 ? `:${timeParts[2]}` : '';
             if (isNaN(y) || isNaN(m) || isNaN(d) || isNaN(hh) || isNaN(mm)) {
                 return { date: dateStr, time: timeStr };
             }
@@ -216,7 +226,7 @@
 
             return {
                 date: `${resY}-${resM}-${resD}`,
-                time: `${resHH}:${resMM}`
+                time: `${resHH}:${resMM}${ssSuffix}`
             };
         } catch (e) {
             return { date: dateStr, time: timeStr };
@@ -228,8 +238,9 @@
         try {
             const parts = isoStr.split('T');
             const datePart = parts[0];
-            const timePart = parts[1].slice(0, 5);
-            const secPart = parts[1].length > 5 ? parts[1].slice(5) : ':00';
+            const timeWithRest = parts[1];
+            const timePart = timeWithRest.slice(0, 5);
+            const secPart = timeWithRest.slice(5);
 
             const converted = convertDateAndTime(datePart, timePart, diffMinutes);
             return `${converted.date}T${converted.time}${secPart}`;
@@ -237,6 +248,20 @@
             return isoStr;
         }
     }
+
+    const ISO_DATE_FIELDS = [
+        'StartDate',
+        'EndDate',
+        'StartDate_Orignal',
+        'startDateLocal',
+        'endDateLocal',
+        'StartDateTime',
+        'EndDateTime',
+        'startDate',
+        'endDate',
+        'startDateTimeLocal',
+        'endDateTimeLocal'
+    ];
 
     function transformPayload(obj, diffMinutes) {
         if (!obj || typeof obj !== 'object') return;
@@ -259,25 +284,34 @@
                     }
                 } catch (e) {}
                 updateBadge();
+                scheduleNoticeUpdate();
             }
         }
 
         if (typeof obj.Date === 'string' && typeof obj.Time === 'string') {
-            if (/^\d{4}-\d{2}-\d{2}$/.test(obj.Date) && /^\d{2}:\d{2}$/.test(obj.Time)) {
+            if (/^\d{4}-\d{2}-\d{2}$/.test(obj.Date) && /^\d{2}:\d{2}(?::\d{2})?$/.test(obj.Time)) {
                 const converted = convertDateAndTime(obj.Date, obj.Time, diffMinutes);
                 obj.Date = converted.date;
                 obj.Time = converted.time;
             }
         }
 
-        if (typeof obj.StartDate === 'string' && obj.StartDate.includes('T')) {
-            obj.StartDate = convertIsoString(obj.StartDate, diffMinutes);
+        if (typeof obj.date === 'string' && typeof obj.time === 'string') {
+            if (/^\d{4}-\d{2}-\d{2}$/.test(obj.date) && /^\d{2}:\d{2}(?::\d{2})?$/.test(obj.time)) {
+                const converted = convertDateAndTime(obj.date, obj.time, diffMinutes);
+                obj.date = converted.date;
+                obj.time = converted.time;
+            }
         }
-        if (typeof obj.EndDate === 'string' && obj.EndDate.includes('T')) {
-            obj.EndDate = convertIsoString(obj.EndDate, diffMinutes);
-        }
-        if (typeof obj.StartDate_Orignal === 'string' && obj.StartDate_Orignal.includes('T')) {
-            obj.StartDate_Orignal = convertIsoString(obj.StartDate_Orignal, diffMinutes);
+
+        // Avoid converting tournament start/end dates on the event metadata object itself
+        if (obj.timeZoneId === undefined) {
+            for (let i = 0; i < ISO_DATE_FIELDS.length; i++) {
+                const field = ISO_DATE_FIELDS[i];
+                if (typeof obj[field] === 'string' && obj[field].includes('T')) {
+                    obj[field] = convertIsoString(obj[field], diffMinutes);
+                }
+            }
         }
 
         if (Array.isArray(obj)) {
@@ -285,7 +319,9 @@
                 transformPayload(obj[i], diffMinutes);
             }
         } else {
-            for (const key of Object.keys(obj)) {
+            const keys = Object.keys(obj);
+            for (let i = 0; i < keys.length; i++) {
+                const key = keys[i];
                 if (typeof obj[key] === 'object' && obj[key] !== null) {
                     transformPayload(obj[key], diffMinutes);
                 }
@@ -294,15 +330,11 @@
     }
 
     // Network Interception Target Checker
+    const TARGET_URL_REGEX = /(?:GetBrackets|GetEventSchedule|GetAllLiveOrActiveEventsDetails|websitestaticapifiles|websitecacheddata|GetOfficialMatches|GetOfficialResult|GetLiveMatches|GetLiveResult|GetMatchCardDetails|GetMatchResultsById|GetEventSubEventForMatch|officialresult)/i;
+
     function isTargetUrl(url) {
         if (!url || typeof url !== 'string') return false;
-        return url.includes('GetBrackets') ||
-               url.includes('GetEventSchedule') ||
-               url.includes('GetAllLiveOrActiveEventsDetails') ||
-               url.includes('websitestaticapifiles') ||
-               url.includes('websitecacheddata') ||
-               url.includes('GetOfficialMatches') ||
-               url.includes('GetEventSubEventForMatch');
+        return TARGET_URL_REGEX.test(url);
     }
 
     // Network Interception
@@ -636,6 +668,47 @@
         badge.innerHTML = `<span>🕒</span><span>${formatOffset(targetOffset)}</span>${isAuto ? `<span style="color:#9ca3af;font-size:10px;">${t('badge_local')}</span>` : ''}`;
     }
 
+    // In-page Notice Text Localization
+    let noticeDebounceTimer = null;
+    function scheduleNoticeUpdate() {
+        if (noticeDebounceTimer) return;
+        noticeDebounceTimer = setTimeout(() => {
+            noticeDebounceTimer = null;
+            updateVenueNoticeText();
+        }, 200);
+    }
+
+    function updateVenueNoticeText() {
+        if (!document.body) return;
+        const targetOffset = getTargetOffsetMinutes();
+        const offsetText = formatOffset(targetOffset);
+        const regex = /(\*?\s*)(All matches are in venue local time|所有比赛时间已换算为\s*UTC[+-]?\d*(?::\d{2})?|全試合時刻は換算済み:\s*UTC[+-]?\d*(?::\d{2})?|All matches converted to\s*UTC[+-]?\d*(?::\d{2})?)/gi;
+        const replacement = `$1${t('notice_converted')} ${offsetText}`;
+
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+        let node;
+        while ((node = walker.nextNode())) {
+            if (node.nodeValue && regex.test(node.nodeValue)) {
+                node.nodeValue = node.nodeValue.replace(regex, replacement);
+            }
+        }
+    }
+
+    function initNoticeObserver() {
+        if (!document.body) return;
+        updateVenueNoticeText();
+        const observer = new MutationObserver((mutations) => {
+            for (let i = 0; i < mutations.length; i++) {
+                const mut = mutations[i];
+                if (mut.addedNodes && mut.addedNodes.length > 0) {
+                    scheduleNoticeUpdate();
+                    break;
+                }
+            }
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+    }
+
     GM_registerMenuCommand(t('menu_settings'), openSettingsModal);
     GM_registerMenuCommand(t('menu_reset'), () => {
         GM_setValue(STORAGE_KEY_MODE, 'auto');
@@ -643,9 +716,14 @@
         location.reload();
     });
 
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', createUIBadge);
-    } else {
+    function init() {
         createUIBadge();
+        initNoticeObserver();
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
     }
 })();

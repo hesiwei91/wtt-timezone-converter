@@ -25,13 +25,22 @@ The target website is an **Angular SPA**:
 2. **API Endpoints**:
    - **Bracket Matches (`Draws` Tab)**:
      - URL Pattern: `cms/GetBrackets/{eventId}/{subEventCode}`
-     - Fields: `Date` (`YYYY-MM-DD`), `Time` (`HH:mm`)
+     - Fields: `Date` (`YYYY-MM-DD`), `Time` (`HH:mm` / `HH:mm:ss`)
    - **Schedule Matches (`Matches` Tab)**:
      - URL Pattern: `websitecacheddata/{eventId}/schedule/schedule.json` or `cms/GetEventSchedule/{eventId}`
      - Fields: `StartDate`, `EndDate`, `StartDate_Orignal` (ISO 8601 strings)
+   - **Results & Finished Matches (`Results` Tab)**:
+     - URL Pattern: `cms/GetOfficialResult/{eventId}`, `websitecacheddata/{eventId}/officialresult_minimal.json`
+     - Fields: `startDateLocal`, `endDateLocal` (ISO 8601 strings)
+   - **Live & Active Matches (`Live` Tab & Carousel)**:
+     - URL Pattern: `cms/GetLiveMatches/{eventId}`, `cms/GetLiveResult/{eventId}`
+     - Fields: `StartDateTime`, `EndDateTime`, `startDateLocal`
+   - **Match Details (`Match Centre` Modal)**:
+     - URL Pattern: `cms/GetMatchCardDetails/{matchId}`, `cms/GetMatchResultsById/{matchId}`
+     - Fields: `startDate`, `endDate`, `startDateLocal`, `startDateTime`
    - **Event Metadata**:
      - URL Pattern: `websitestaticapifiles/{eventId}/{eventId}_active_live_event_details.json` or `cms/GetAllLiveOrActiveEventsDetails`
-     - Fields: `timeZoneId`, `venueId`, `countryCode`, `city`, `startDateTime`
+     - Fields: `timeZoneId`, `venueId`, `countryCode`, `city`, `startDateTime` (tournament start date, excluded from match time shift)
 
 ---
 
@@ -49,7 +58,11 @@ The target website is an **Angular SPA**:
   ```
 - Handles date changes across midnight (both forward and backward).
 
-### Rule 3: UI Design Constraints
+### Rule 3: Static Notice Text DOM Synchronization
+- WTT renders a static notice `* All matches are in venue local time`.
+- Observe `document.body` mutations via a debounced `MutationObserver` and replace the notice with dynamic target timezone info (e.g. `* 所有比赛时间已换算为 UTC+8`).
+
+### Rule 4: UI Design Constraints
 - Bottom-right indicator (`#wtt-tz-badge`) must remain compact and unobtrusive.
 - Dropdown menus in the settings modal must use height-constrained containers with scrolling (`overflow-y: auto`) rather than native `<select>` to avoid viewport overflow.
 
@@ -58,8 +71,9 @@ The target website is an **Angular SPA**:
 ## 4. Verification Requirements
 
 Before committing changes:
-- Verify `Date` and `Time` conversion in Draws and Schedule tabs.
+- Verify `Date` and `Time` conversion in Draws, Schedule, Results, and Live tabs.
 - Verify date rollover across midnight (both forward and backward).
+- Verify in-page venue notice localization (`zh`, `ja`, `en`).
 - Verify UI rendering across supported languages (`zh`, `ja`, `en`).
 - Verify timezone indicator does not obstruct page content.
 - Verify settings persistence across page reloads via `GM_setValue`.
