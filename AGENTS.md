@@ -27,7 +27,7 @@ The target website is an **Angular SPA**:
      - URL Pattern: `cms/GetBrackets/{eventId}/{subEventCode}`
      - Fields: `Date` (`YYYY-MM-DD`), `Time` (`HH:mm`)
    - **Schedule Matches (`Matches` Tab)**:
-     - URL Pattern: `cms/GetEventSchedule/{eventId}`
+     - URL Pattern: `websitecacheddata/{eventId}/schedule/schedule.json` or `cms/GetEventSchedule/{eventId}`
      - Fields: `StartDate`, `EndDate`, `StartDate_Orignal` (ISO 8601 strings)
    - **Event Metadata**:
      - URL Pattern: `websitestaticapifiles/{eventId}/{eventId}_active_live_event_details.json` or `cms/GetAllLiveOrActiveEventsDetails`

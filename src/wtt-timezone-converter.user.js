@@ -153,10 +153,34 @@
         return -new Date().getTimezoneOffset();
     }
 
+    // Clear WTT schedule localStorage cache so that fresh transformed data is always loaded
+    function clearWttScheduleCache() {
+        try {
+            const keysToRemove = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && (key.startsWith('event_schedule_v2_') || key.startsWith('event_schedule_upcoming_only_v2_'))) {
+                    keysToRemove.push(key);
+                }
+            }
+            keysToRemove.forEach(k => localStorage.removeItem(k));
+        } catch (e) {}
+    }
+    clearWttScheduleCache();
+
     function getVenueOffsetMinutes() {
         if (detectedVenueOffsetMinutes !== null) {
             return detectedVenueOffsetMinutes;
         }
+        try {
+            const match = location.search.match(/eventId=(\d+)/);
+            if (match) {
+                const cached = sessionStorage.getItem('wtt_venue_offset_' + match[1]);
+                if (cached !== null) {
+                    return Number(cached);
+                }
+            }
+        } catch (e) {}
         return 120; // Default: Europe CEST (UTC+2)
     }
 
@@ -228,6 +252,12 @@
                     }
                 }
                 detectedVenueOffsetMinutes = offset;
+                try {
+                    const match = location.search.match(/eventId=(\d+)/);
+                    if (match) {
+                        sessionStorage.setItem('wtt_venue_offset_' + match[1], String(offset));
+                    }
+                } catch (e) {}
                 updateBadge();
             }
         }
@@ -263,6 +293,18 @@
         }
     }
 
+    // Network Interception Target Checker
+    function isTargetUrl(url) {
+        if (!url || typeof url !== 'string') return false;
+        return url.includes('GetBrackets') ||
+               url.includes('GetEventSchedule') ||
+               url.includes('GetAllLiveOrActiveEventsDetails') ||
+               url.includes('websitestaticapifiles') ||
+               url.includes('websitecacheddata') ||
+               url.includes('GetOfficialMatches') ||
+               url.includes('GetEventSubEventForMatch');
+    }
+
     // Network Interception
     const origOpen = XMLHttpRequest.prototype.open;
     const origSend = XMLHttpRequest.prototype.send;
@@ -276,14 +318,7 @@
         const self = this;
         const url = this._wttUrl || '';
 
-        const isTarget = url.includes('GetBrackets') ||
-                         url.includes('GetEventSchedule') ||
-                         url.includes('GetAllLiveOrActiveEventsDetails') ||
-                         url.includes('websitestaticapifiles') ||
-                         url.includes('GetOfficialMatches') ||
-                         url.includes('GetEventSubEventForMatch');
-
-        if (isTarget) {
+        if (isTargetUrl(url)) {
             this.addEventListener('readystatechange', function () {
                 if (self.readyState === 4 && self.status === 200) {
                     try {
@@ -311,12 +346,7 @@
             const response = await origFetch.apply(this, args);
             const url = args[0] && typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url ? args[0].url : '');
 
-            const isTarget = url.includes('GetBrackets') ||
-                             url.includes('GetEventSchedule') ||
-                             url.includes('GetAllLiveOrActiveEventsDetails') ||
-                             url.includes('websitestaticapifiles');
-
-            if (isTarget) {
+            if (isTargetUrl(url)) {
                 try {
                     const clone = response.clone();
                     const data = await clone.json();
@@ -547,6 +577,7 @@
                 GM_setValue(STORAGE_KEY_OFFSET, curOffset);
             }
             close();
+            clearWttScheduleCache();
             updateBadge();
             location.reload();
         });
@@ -608,6 +639,7 @@
     GM_registerMenuCommand(t('menu_settings'), openSettingsModal);
     GM_registerMenuCommand(t('menu_reset'), () => {
         GM_setValue(STORAGE_KEY_MODE, 'auto');
+        clearWttScheduleCache();
         location.reload();
     });
 
